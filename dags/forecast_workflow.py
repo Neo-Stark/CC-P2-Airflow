@@ -1,10 +1,10 @@
-from datetime import timedelta
-from textwrap import dedent
+import json
+from os import sep
 import time
+from datetime import timedelta
 
 import pandas as pd
 import pymongo
-import json
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
@@ -12,7 +12,7 @@ from airflow.utils.dates import days_ago
 
 # CONSTANTS
 DATA_DIR = '/tmp/datos'
-MONGO_CLIENT = 'mongodb+srv://neostark:T19blHfuaefxocwA@sandbox.l4kky.mo'
+MONGO_CLIENT = 'mongodb+srv://neostark:T19blHfuaefxocwA@sandbox.l4kky.mongodb.net'
 
 # These args will get passed on to each operator
 # You can override them on a per-task basis during operator initialization
@@ -69,7 +69,6 @@ with DAG(
     dataframe = pd.DataFrame(data=col_names)
     dataframe = dataframe.dropna()
     # Reducimos el tamaño del dataset para que las predicciones sean más rápidas (no nos interesa que sean precisas ahora mismo)
-    dataframe = dataframe.drop()
     dataframe.to_csv(f'{DATA_DIR}/forecast_sf.csv', sep=';', encoding='utf-8', index=False)
   
   preprocess_data = PythonOperator(
@@ -85,18 +84,12 @@ with DAG(
     myclient = pymongo.MongoClient(client)
     mydb = myclient[db]
     mycol = mydb[collection]
-
-    data = pd.read_csv(f'{DATA_DIR}/{file_name}')
-    data_json = json.loads(data.to_json(orient='records'))
-    info = mycol.insert_one(data_json)
-
-    details = {
-        'inserted_id': info.inserted_id,
-        'file_name': file_name,
-        'created_time': time.time()
-    }
-
-    return details
+    data = pd.read_csv(f'{DATA_DIR}/{file_name}', sep=';')
+    data_dict = data.to_dict('records')
+    # limpiamos los datos anteriores
+    mycol.drop()
+    # insertamos los nuevos
+    mycol.insert_many(data_dict)
 
   save_data = PythonOperator(
     task_id='save_data',
@@ -115,5 +108,13 @@ with DAG(
   # Descargamos (clonamos) el código necesario desde github
   get_code = BashOperator(
     task_id='get_code',
-    bash_command='git clone '
+    bash_command='git clone https://github.com/Neo-Stark/CC-P2-Airflow.git /tmp/services'
   )
+
+  # Calculamos los modelos (o el modelo, ya que en la segunda versión usamos algorithmia)
+  make_model_v1 = BashOperator(
+    task_id='make_model_v1',
+    bash_command='python /tmp/services/v1/arima_prediction.py'
+  )
+  
+  get_code >> make_model_v1

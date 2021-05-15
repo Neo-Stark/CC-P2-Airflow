@@ -1,0 +1,7 @@
+Flask
+pmdarima
+pymongo
+pytest
+dnspython
+apache-airflow-providers-mongo
+algorithmia
