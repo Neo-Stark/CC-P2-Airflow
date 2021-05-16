@@ -106,6 +106,7 @@ services:
 
   airflow-worker:
     <<: *airflow-common
+    user: "50000:0"
     command: celery worker
     restart: always
 

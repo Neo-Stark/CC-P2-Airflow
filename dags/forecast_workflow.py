@@ -68,7 +68,6 @@ with DAG(
     col_names = {'DATE':datetime, 'TEMP':temperature_sf, 'HUM':humidity_sf}
     dataframe = pd.DataFrame(data=col_names)
     dataframe = dataframe.dropna()
-    # Reducimos el tamaño del dataset para que las predicciones sean más rápidas (no nos interesa que sean precisas ahora mismo)
     dataframe.to_csv(f'{DATA_DIR}/forecast_sf.csv', sep=';', encoding='utf-8', index=False)
   
   preprocess_data = PythonOperator(
@@ -108,7 +107,13 @@ with DAG(
   # Descargamos (clonamos) el código necesario desde github
   get_code = BashOperator(
     task_id='get_code',
-    bash_command='git clone https://github.com/Neo-Stark/CC-P2-Airflow.git /tmp/services'
+    bash_command='rm -r /tmp/services; git clone https://github.com/Neo-Stark/CC-P2-Services.git /tmp/services'
+  )
+
+  # Testeamos que el servicio funciona correctamente
+  test_service = BashOperator(
+    task_id="test_service",
+    bash_command='cd /tmp/services && pytest tests.py'
   )
 
   # Calculamos los modelos (o el modelo, ya que en la segunda versión usamos algorithmia)
@@ -117,4 +122,13 @@ with DAG(
     bash_command='python /tmp/services/v1/arima_prediction.py'
   )
   
-  get_code >> make_model_v1
+  get_code >> test_service 
+  [test_service, save_data] >> make_model_v1
+
+  #Fase 5: Despliegue
+  heroku_app = BashOperator(
+    task_id="heroku_app",
+    bash_command="cd /tmp/services && heroku git:remote -a forecast-cc && git push heroku main"
+  )
+
+  make_model_v1 >> heroku_app
